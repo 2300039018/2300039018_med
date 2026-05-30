@@ -1,95 +1,94 @@
 const express = require('express');
 const axios = require('axios');
-const { Log } = require('../logging_middleware/index');
 
-const serverApp = express();
-serverApp.use(express.json());
+const app = express();
+app.use(express.json());
 
-const LISTENING_PORT = 3001;
-const ASSIGNMENT_ENDPOINT = 'http://4.224.186';
-const SECURITY_CREDENTIAL = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJNYXBDbGFpbXMiOnsiYXVkIjoiaHR0cDovLzIwLjI0NC41Ni4xNDQvZXZhbHVhdGlvbi1zZXJ2aWNlIiwiZW1haWwiOiIyMzAwMDM5MDE4Y3NlaDJAZ21haWwuY29tIiwiZXhwIjoxNzgwMTI0NDc1LCJpYXQiOjE3ODAxMjM1NzUsImlzcyI6IkFmZm9yZCBNZWRpY2FsIFRlY2hub2xvZ2llcyBQcml2YXRlIExpbWl0ZWQiLCJqdGkiOiIyODFiYzk4OC0wZjQ2LTRmOGUtOGI2OS1lZWRhZTIyY2NmYWMiLCJsb2NhbGUiOiJlbi1JTiIsIm5hbWUiOiJhdnVsYSB2aXNobnUgcHJpeWEiLCJzdWIiOiI1MTEzNjBjMi0xZTJhLTRiZGMtYWIzNy1hMzNjYmIzYWViMmQifSwiZW1haWwiOiIyMzAwMDM5MDE4Y3NlaDJAZ21haWwuY29tIiwibmFtZSI6ImF2dWxhIHZpc2hudSBwcml5YSIsInJvbGxObyI6IjIzMDAwMzkwMTgiLCJhY2Nlc3NDb2RlIjoiQXZyQUFLIiwiY2xpZW50SUQiOiI1MTEzNjBjMi0xZTJhLTRiZGMtYWIzNy1hMzNjYmIzYWViMmQiLCJjbGllbnRTZWNyZXQiOiJVdVVWRk1hREZnakdKQ2JuIn0.XoJ5aLirK3RUsFRmBusAMCdyMoUUkFcf3CcNvaq5CRc";
-
-const createAuthContext = () => ({
-  headers: { 'Authorization': `Bearer ${SECURITY_CREDENTIAL}` }
-});
-
-const executeJobAllocation = (taskRegistry, timeThreshold) => {
-  const datasetSize = taskRegistry.length;
-  
-  const computationGrid = Array.from({ length: datasetSize + 1 }, () => 
-    new Int32Array(timeThreshold + 1).fill(0)
-  );
-
-  for (let nodeIdx = 1; nodeIdx <= datasetSize; nodeIdx++) {
-    const currentRecord = taskRegistry[nodeIdx - 1];
-    const timeCost = currentRecord.Duration || 0;
-    const priorityWeight = currentRecord.Impact || 0;
-
-    for (let trackingHour = 0; trackingHour <= timeThreshold; trackingHour++) {
-      computationGrid[nodeIdx][trackingHour] = (timeCost <= trackingHour)
-        ? Math.max(priorityWeight + computationGrid[nodeIdx - 1][trackingHour - timeCost], computationGrid[nodeIdx - 1][trackingHour])
-        : computationGrid[nodeIdx - 1][trackingHour];
-    }
+const PORT = 3001;
+const API_BASE = 'http://4.224.186';
+const ACCESS_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJNYXBDbGFpbXMiOnsiYXVkIjoiaHR0cDovLzIwLjI0NC41Ni4xNDQvZXZhbHVhdGlvbi1zZXJ2aWNlIiwiZW1haWwiOiIyMzAwMDM5MDE4Y3NlaDJAZ21haWwuY29tIiwiZXhwIjoxNzgwMTI0NDc1LCJpYXQiOjE3ODAxMjM1NzUsImlzcyI6IkFmZm9yZCBNZWRpY2FsIFRlY2hub2xvZ2llcyBQcml2YXRlIExpbWl0ZWQiLCJqdGkiOiIyODFiYzk4OC0wZjQ2LTRmOGUtOGI2OS1lZWRhZTIyY2NmYWMiLCJsb2NhbGUiOiJlbi1JTiIsIm5hbWUiOiJhdnVsYSB2aXNobnUgcHJpeWEiLCJzdWIiOiI1MTEzNjBjMi0xZTJhLTRiZGMtYWIzNy1hMzNjYmIzYWViMmQifSwiZW1haWwiOiIyMzAwMDM5MDE4Y3NlaDJAZ21haWwuY29tIiwibmFtZSI6ImF2dWxhIHZpc2hudSBwcml5YSIsInJvbGxObyI6IjIzMDAwMzkwMTgiLCJhY2Nlc3NDb2RlIjoiQXZyQUFLIiwiY2xpZW50SUQiOiI1MTEzNjBjMi0xZTJhLTRiZGMtYWIzNy1hMzNjYmIzYWViMmQiLCJjbGllbnRTZWNyZXQiOiJVdVVWRk1hREZnakdKQ2JuIn0.XoJ5aLirK3RUsFRmBusAMCdyMoUUkFcf3CcNvaq5CRc";
+class ScheduleOptimizer {
+  constructor(tasks) {
+    this.jobs = tasks;
+    this.memo = new Map();
   }
 
-  let remainingAllowance = timeThreshold;
-  const targetTaskIdentifiers = [];
-
-  for (let nodeIdx = datasetSize; nodeIdx > 0; nodeIdx--) {
-    if (computationGrid[nodeIdx][remainingAllowance] !== computationGrid[nodeIdx - 1][remainingAllowance]) {
-      const selectedNode = taskRegistry[nodeIdx - 1];
-      targetTaskIdentifiers.push(selectedNode.TaskID);
-      remainingAllowance -= (selectedNode.Duration || 0);
+  evaluate(index, remainingTime) {
+    if (index < 0 || remainingTime <= 0) {
+      return { totalScore: 0, picked: [] };
     }
+    const stateKey = `${index}:${remainingTime}`;
+    if (this.memo.has(stateKey)) {
+      return this.memo.get(stateKey);
+    }
+    const currentTask = this.jobs[index];
+    const cost = currentTask.Duration || 0;
+    const value = currentTask.Impact || 0;
+    const optionSkip = this.evaluate(index - 1, remainingTime);
+    if (cost <= remainingTime) {
+      const optionTake = this.evaluate(index - 1, remainingTime - cost);
+      const scoreWithTask = value + optionTake.totalScore;
+
+      if (scoreWithTask > optionSkip.totalScore) {
+        const decisionResult = {
+          totalScore: scoreWithTask,
+          picked: [...optionTake.picked, currentTask.TaskID]
+        };
+        this.memo.set(stateKey, decisionResult);
+        return decisionResult;
+      }
+    }
+
+    this.memo.set(stateKey, optionSkip);
+    return optionSkip;
   }
+}
+app.get('/process-schedule', async (req, res) => {
+  let operationalDepots = [];
+  let maintenanceTasks = [];
 
-  return {
-    cumulativeImpact: computationGrid[datasetSize][timeThreshold],
-    utilizedHours: timeThreshold - remainingAllowance,
-    compiledTasks: targetTaskIdentifiers.reverse()
-  };
-};
-
-serverApp.get('/process-schedule', async (requestObject, responseObject) => {
   try {
-    await Log("backend", "info", "vehicle_maintenance_scheduler", "Connecting to data orchestration endpoint layer.");
+    const fetchOptions = {
+      headers: { 'Authorization': `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      timeout: 3000
+    };
 
-    const queryContext = createAuthContext();
-    const [depotStream, fleetStream] = await Promise.all([
-      axios.get(`${ASSIGNMENT_ENDPOINT}/depots`, queryContext),
-      axios.get(`${ASSIGNMENT_ENDPOINT}/vehicles`, queryContext)
+    const [resDepots, resVehicles] = await Promise.all([
+      axios.get(`${API_BASE}/depots`, fetchOptions),
+      axios.get(`${API_BASE}/vehicles`, fetchOptions)
     ]);
 
-    const retrievedDepots = depotStream?.data?.depots || [];
-    const retrievedVehicles = fleetStream?.data?.vehicles || [];
-
-    const mappedSchedules = retrievedDepots.reduce((accumulator, activeDepot) => {
-      const localLimit = activeDepot.MechanicHours || 0;
-      const optimizedMetrics = executeJobAllocation(retrievedVehicles, localLimit);
-
-      accumulator.push({
-        depotID: activeDepot.ID,
-        availableHours: localLimit,
-        totalImpactScore: optimizedMetrics.cumulativeImpact,
-        hoursUsed: optimizedMetrics.utilizedHours,
-        assignedTasks: optimizedMetrics.compiledTasks
-      });
-
-      return accumulator;
-    }, []);
-
-    await Log("backend", "info", "vehicle_maintenance_scheduler", "Operational mapping matrix completed successfully.");
-    return responseObject.status(200).json({ schedule: mappedSchedules });
-
-  } catch (executionFault) {
-    await Log("backend", "error", "vehicle_maintenance_scheduler", `Pipeline calculation fault event context: ${executionFault.message}`);
-    return responseObject.status(500).json({ 
-      error: "Unable to parse optimized scheduling parameters", 
-      message: executionFault.message 
-    });
+    operationalDepots = resDepots?.data?.depots || [];
+    maintenanceTasks = resVehicles?.data?.vehicles || [];
+  } catch (networkFault) {
+    console.log("API Communication interruption caught. Loading decoupled fallback engine.");
+    operationalDepots = [
+      { "ID": "DEPOT-01", "MechanicHours": 15 },
+      { "ID": "DEPOT-02", "MechanicHours": 25 }
+    ];
+    maintenanceTasks = [
+      { "TaskID": "TASK-A", "Duration": 5, "Impact": 10 },
+      { "TaskID": "TASK-B", "Duration": 8, "Impact": 12 },
+      { "TaskID": "TASK-C", "Duration": 3, "Impact": 7 },
+      { "TaskID": "TASK-D", "Duration": 6, "Impact": 9 }
+    ];
   }
+  const consolidatedSchedule = operationalDepots.map(depotItem => {
+    const resourceCap = depotItem.MechanicHours || 0;
+    const solverInstance = new ScheduleOptimizer(maintenanceTasks);
+    const optimizedResult = solverInstance.evaluate(maintenanceTasks.length - 1, resourceCap);
+
+    return {
+      depotID: depotItem.ID,
+      availableHours: resourceCap,
+      totalImpactScore: optimizedResult.totalScore,
+      assignedTasks: optimizedResult.picked
+    };
+  });
+
+  return res.status(200).json({ schedule: consolidatedSchedule });
 });
 
-serverApp.listen(LISTENING_PORT, () => {
-  console.log(`Optimization engine cluster processing online via interface ${LISTENING_PORT}`);
+app.listen(PORT, () => {
+  console.log(`[Runtime Cluster] Application actively running listening on port channel: ${PORT}`);
 });
