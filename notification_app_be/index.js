@@ -93,4 +93,3 @@ communicationHub.get('/get-notifications', async (req, res) => {
 communicationHub.listen(UTILITY_PORT, () => {
   console.log(`[Core Telemetry Cluster] Notification stream operational on host port channel: ${UTILITY_PORT}`);
 });
- 
